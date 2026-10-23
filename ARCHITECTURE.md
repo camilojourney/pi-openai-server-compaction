@@ -66,7 +66,9 @@ transport and direct OpenAI HTTP fallback. It retains Pi-generated request
 configuration in order, then supplies the native compacted conversation history.
 It does not reconstruct schemas or mutate either caller input. The custom
 WebSocket path reads the effective prompt and tool set from Pi's transcript
-helpers rather than the removed provider-context shorthand.
+helpers rather than the removed provider-context shorthand. It uses Pi 1.4's native
+tool converter for both warm-up and ordinary requests, and its shared Responses
+stream decoder for grammar inputs, namespaces, item IDs, and streamed content.
 
 Custom tool calls are identified by the Responses `ctc_` item ID preserved in Pi's
 call ID. Replay keeps their raw string inputs, corresponding output type, and
@@ -235,7 +237,9 @@ conversion, post-compaction configuration, tool-call replay, and a local WebSock
 
 Uses isolated synthetic sessions and the configured provider. It verifies actual
 JSON/grammar tool execution, late registration, two native compactions, and reopening
-the saved session. Provider calls are bounded; temporary evidence is retained.
+the saved session. A shared budget on the agent payload boundary stops ordinary
+request 21 before extension dispatch or transmission, including after reopening.
+The run has a five-minute timeout; temporary evidence is retained.
 
 ### Live end-to-end test
 

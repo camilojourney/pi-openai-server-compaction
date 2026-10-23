@@ -187,7 +187,8 @@ npm test
 ```
 
 This runs TypeScript checking, the existing smoke regressions, native Pi request
-conversion tests, and a local WebSocket test. No provider credentials are needed.
+conversion and WebSocket grammar-tool tests, and a local HTTP request-budget
+regression. No provider credentials are needed.
 
 Run the bounded live tool-access regression with existing Codex authentication:
 
@@ -196,7 +197,8 @@ npm run test:live:tools
 ```
 
 It uses synthetic context and isolated sessions, not your project or existing
-conversations. It makes provider requests and retains temporary acceptance evidence.
+conversations. It allows at most 20 ordinary requests across sessions, times out
+after five minutes, and retains temporary acceptance evidence.
 The default model is `openai-codex/gpt-6.1-sol`; override it with
 `PI_OPENAI_SERVER_COMPACTION_TEST_MODEL`.
 

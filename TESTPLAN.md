@@ -19,14 +19,21 @@ Run `npm ci --ignore-scripts` and `npm test` first. Offline regressions cover th
 real Codex request builder and extension hooks, resume/repeated compaction,
 late tool loading/removal, synthetic tool-search declarations, configuration
 preservation, grammar/namespaced replay, HTTP fallback, and a local WebSocket.
+The WebSocket tests cover native Lark/regex declarations during warm-up and normal
+requests, streamed custom/JSON calls with namespaces and item IDs, continuation,
+late tool updates, restored compaction, usage accounting, and failure/abort paths.
+An isolated SDK tool loop against a local HTTP server proves ordinary request 21
+is not transmitted even when extension hook exceptions are swallowed, and that
+reopening the session does not reset the budget.
 
 Run `npm run test:live:tools` with existing authentication for the default
 `openai-codex/gpt-6.1-sol`, or select a model through
 `PI_OPENAI_SERVER_COMPACTION_TEST_MODEL`. It uses a temporary synthetic project,
 executes JSON and grammar tools, registers a new tool after native compaction,
 compacts twice, reopens the session, and checks execution receipts. A portable-only
-summary fallback fails this acceptance. It bounds model requests and retains local
-evidence without modifying existing sessions or global configuration.
+summary fallback fails this acceptance. It limits ordinary requests to 20 at the
+agent payload boundary and times out after five minutes. It retains local evidence
+without modifying existing sessions or global configuration.
 
 ## Suggested manual tests
 

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import extensionFactory from "../../src/index.ts";
+import { createRequestBudget } from "./request-budget.mjs";
 
 // Synthetic, bounded live acceptance. No user session, project context, global
 // extensions, or shell tools are loaded. Keep the temporary evidence on failure.
@@ -17,7 +18,7 @@ const model = runtime.getModel(modelName.slice(0, slash), modelName.slice(slash 
 assert.ok(model, `Model unavailable: ${modelName}`);
 const settings = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 0 }, retry: { enabled: false } });
 const calls = [];
-let requests = 0;
+const budget = createRequestBudget();
 let activePi;
 let session;
 const timeout = setTimeout(() => { void session?.abort(); }, 300000);
@@ -45,7 +46,6 @@ async function open(manager) {
       activePi = pi;
       pi.registerTool(probe("probe_json"));
       pi.registerTool(probe("probe_code", true));
-      pi.on("before_provider_request", () => { assert.ok(++requests <= 20, "Live request budget exceeded"); });
     }],
   });
   await loader.reload();
@@ -54,6 +54,7 @@ async function open(manager) {
     thinkingLevel: "high", resourceLoader: loader, settingsManager: settings, sessionManager: manager,
     tools: ["probe_json", "probe_code", "probe_late"],
   }));
+  session.agent.onPayload = budget.wrap(session.agent.onPayload);
   await session.bindExtensions({});
 }
 
@@ -89,7 +90,7 @@ try {
   await invoke("probe_code");
   const entries = (await readFile(file, "utf8")).trim().split("\n").map(JSON.parse);
   assert.equal(entries.filter((entry) => entry.type === "compaction").length, 2);
-  console.log(JSON.stringify({ status: "PASS", model: modelName, compactions: 2, toolCalls: calls.length, requests, evidence: root }));
+  console.log(JSON.stringify({ status: "PASS", model: modelName, compactions: 2, toolCalls: calls.length, requests: budget.requests, evidence: root }));
 } finally {
   clearTimeout(timeout);
   session?.dispose();
