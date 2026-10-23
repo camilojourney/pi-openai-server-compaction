@@ -165,6 +165,14 @@ function maybeNotifyRequestFeatures(params: {
   params.ui.notify(`OpenAI compaction active for ${key} (${params.features.join(", ")})`, "info");
 }
 
+function concreteHeaders(headers: Record<string, string | null> | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (typeof value === "string") result[name] = value;
+  }
+  return result;
+}
+
 export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
   const notifiedModels = new Set<string>();
 
@@ -211,6 +219,9 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok || !auth.apiKey) return undefined;
 
+    // Pi 1.4 permits null-valued provider header overrides; the compaction API
+    // accepts only concrete headers. Never stringify a removed header as "null".
+    const headers = concreteHeaders(auth.headers);
     const tools = buildToolsPayload(pi.getAllTools(), pi.getActiveTools());
     const sessionId = getSessionId(ctx);
     const branchEntries = event.branchEntries as BranchEntry[];
@@ -234,7 +245,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
         messages: fullBranchMessages,
         model,
         apiKey: auth.apiKey,
-        headers: auth.headers,
+        headers,
         customInstructions: event.customInstructions,
         signal: event.signal,
         thinkingLevel,
@@ -244,7 +255,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
       callRemoteCompactionEndpoint({
         model,
         apiKey: auth.apiKey,
-        headers: auth.headers,
+        headers,
         sessionId,
         input: promptResponseItems,
         instructions: ctx.getSystemPrompt(),

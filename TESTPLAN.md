@@ -13,6 +13,21 @@
    - session resume/reload
    - cost totals on WS path are non-zero and plausible
 
+## Pi 1.4 regression checks
+
+Run `npm ci --ignore-scripts` and `npm test` first. Offline regressions cover the
+real Codex request builder and extension hooks, resume/repeated compaction,
+late tool loading/removal, synthetic tool-search declarations, configuration
+preservation, grammar/namespaced replay, HTTP fallback, and a local WebSocket.
+
+Run `npm run test:live:tools` with existing authentication for the default
+`openai-codex/gpt-6.1-sol`, or select a model through
+`PI_OPENAI_SERVER_COMPACTION_TEST_MODEL`. It uses a temporary synthetic project,
+executes JSON and grammar tools, registers a new tool after native compaction,
+compacts twice, reopens the session, and checks execution receipts. A portable-only
+summary fallback fails this acceptance. It bounds model requests and retains local
+evidence without modifying existing sessions or global configuration.
+
 ## Suggested manual tests
 
 ### 1. Baseline supported turn

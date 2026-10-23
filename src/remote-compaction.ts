@@ -19,7 +19,7 @@ import {
   serializeConversation,
   type CompactionResult,
 } from "@earendil-works/pi-coding-agent";
-import { calculateCost, type Model, type Usage } from "@earendil-works/pi-ai";
+import { calculateCost, type Model, type ToolCall, type Usage } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import { isRecord } from "./config.ts";
 import {
@@ -374,6 +374,30 @@ function nonLlmMessageToUserContent(message: AgentMessage): ResponseContentItem[
   return contentToResponseContentItems(flattened.content);
 }
 
+function isCustomToolCallId(id: string): boolean {
+  // Pi preserves Responses item IDs after the call ID: call_*|ctc_* for
+  // grammar tools, call_*|fc_* for JSON functions. This survives session reload.
+  return id.split("|", 2)[1]?.startsWith("ctc_") === true;
+}
+
+// [impl->req~remote-history.tool-replay~1]
+function toolCallToResponseItem(block: ToolCall): ResponseItem {
+  const base = {
+    name: block.name,
+    call_id: block.id.split("|", 1)[0],
+    ...(block.namespace !== undefined ? { namespace: block.namespace } : {}),
+  };
+  if (isCustomToolCallId(block.id)) {
+    // Pi's grammar sampling contract requires exactly one string property.
+    const values = Object.values(block.arguments);
+    if (values.length !== 1 || typeof values[0] !== "string") {
+      throw new Error(`Invalid custom-tool input for ${block.name}: expected one string property.`);
+    }
+    return { type: "custom_tool_call", ...base, input: values[0] };
+  }
+  return { type: "function_call", ...base, arguments: JSON.stringify(block.arguments ?? {}) };
+}
+
 export function messageToResponseItems(message: AgentMessage): ResponseItem[] {
   const items: ResponseItem[] = [];
 
@@ -417,13 +441,7 @@ export function messageToResponseItems(message: AgentMessage): ResponseItem[] {
       if (block.type !== "toolCall") continue;
 
       flushText();
-      const callId = typeof block.id === "string" ? block.id.split("|", 1)[0] : block.id;
-      items.push({
-        type: "function_call",
-        name: block.name,
-        call_id: typeof callId === "string" ? callId : String(callId),
-        arguments: JSON.stringify(block.arguments ?? {}),
-      });
+      items.push(toolCallToResponseItem(block));
     }
 
     flushText();
@@ -432,7 +450,7 @@ export function messageToResponseItems(message: AgentMessage): ResponseItem[] {
 
   if (message.role === "toolResult") {
     items.push({
-      type: "function_call_output",
+      type: isCustomToolCallId(message.toolCallId) ? "custom_tool_call_output" : "function_call_output",
       call_id: message.toolCallId.split("|", 1)[0],
       output: toolResultContentToOutput(message.content),
     });
@@ -447,8 +465,12 @@ export function messageToResponseItems(message: AgentMessage): ResponseItem[] {
   return items;
 }
 
-export function messagesToResponseItems(messages: AgentMessage[]): ResponseItem[] {
-  return messages.flatMap((message) => messageToResponseItems(message));
+export function messagesToResponseItems(
+  messages: AgentMessage[],
+  model?: { input?: readonly unknown[] },
+): ResponseItem[] {
+  const items = messages.flatMap((message) => messageToResponseItems(message));
+  return model ? stripImagesWhenUnsupported(items, model) : items;
 }
 
 function cloneResponseItem(item: ResponseItem): ResponseItem {
@@ -1048,7 +1070,7 @@ function assistantMessageMatchesModelKey(
 ): boolean {
   const target = parseModelKeyParts(targetModelKey);
   if (!target) return false;
-  if (!isRecord(message)) return false;
+  if (message.role !== "assistant") return false;
   return message.provider === target.provider && message.model === target.id;
 }
 

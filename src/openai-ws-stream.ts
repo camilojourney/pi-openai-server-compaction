@@ -9,11 +9,14 @@ import { randomUUID } from "node:crypto";
 import {
   calculateCost,
   createAssistantMessageEventStream,
+  getCurrentSystemPrompt,
+  getCurrentTools,
+  normalizeContext,
+  type JsonObject,
   type AssistantMessage,
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
-  type Message,
   type Model,
   type SimpleStreamOptions,
   type StopReason,
@@ -25,12 +28,12 @@ import {
 import { streamSimpleOpenAIResponses } from "@earendil-works/pi-ai/compat";
 import { loadConfig } from "./config.ts";
 import {
+  applyRemoteHistoryPayloadPatch,
   isDirectOpenAIResponsesModel,
   modelKey,
   thinkingLevelToResponsesReasoning,
 } from "./openai.ts";
 import {
-  type ContentPart,
   type FunctionToolDefinition,
   type InputItem,
   isResponseObject,
@@ -47,6 +50,7 @@ import {
 } from "./stream-message-shared.ts";
 import {
   buildCodexWebSocketHeaders,
+  messagesToResponseItems,
   normalizeResponseItemsForPrompt,
 } from "./remote-compaction.ts";
 import {
@@ -72,14 +76,6 @@ type AssistantMessageEventStreamLike = {
   end(result?: AssistantMessage): void;
   result(): Promise<AssistantMessage>;
   [Symbol.asyncIterator](): AsyncIterator<AssistantMessageEvent>;
-};
-
-type AnyMessage = Message & {
-  role: string;
-  content: unknown;
-  toolCallId?: unknown;
-  toolUseId?: unknown;
-  phase?: unknown;
 };
 
 type AssistantMessageWithPhase = AssistantMessage & { phase?: OpenAIResponsesAssistantPhase };
@@ -260,118 +256,6 @@ function encodeAssistantTextSignature(params: {
   });
 }
 
-function parseAssistantTextSignature(
-  value: unknown,
-): { id: string; phase?: OpenAIResponsesAssistantPhase } | null {
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  if (!value.startsWith("{")) return { id: value };
-  try {
-    const parsed = JSON.parse(value) as { v?: unknown; id?: unknown; phase?: unknown };
-    if (parsed.v !== 1 || typeof parsed.id !== "string") return null;
-    return {
-      id: parsed.id,
-      ...(normalizeAssistantPhase(parsed.phase) ? { phase: normalizeAssistantPhase(parsed.phase) } : {}),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function supportsImageInput(modelOverride?: ReplayModelInfo): boolean {
-  return !Array.isArray(modelOverride?.input) || modelOverride.input.includes("image");
-}
-
-function contentToText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((part): part is { type?: string; text?: string } => Boolean(part) && typeof part === "object")
-    .filter(
-      (part) =>
-        (part.type === "text" || part.type === "input_text" || part.type === "output_text") &&
-        typeof part.text === "string",
-    )
-    .map((part) => part.text as string)
-    .join("");
-}
-
-function contentToOpenAIParts(content: unknown, modelOverride?: ReplayModelInfo): ContentPart[] {
-  if (typeof content === "string") {
-    return content ? [{ type: "input_text", text: content }] : [];
-  }
-  if (!Array.isArray(content)) return [];
-
-  const includeImages = supportsImageInput(modelOverride);
-  const parts: ContentPart[] = [];
-  for (const part of content as Array<{
-    type?: string;
-    text?: string;
-    data?: string;
-    mimeType?: string;
-    source?: unknown;
-  }>) {
-    if (
-      (part.type === "text" || part.type === "input_text" || part.type === "output_text") &&
-      typeof part.text === "string"
-    ) {
-      parts.push({ type: "input_text", text: part.text });
-      continue;
-    }
-    if (!includeImages) continue;
-    if (part.type === "image" && typeof part.data === "string") {
-      parts.push({
-        type: "input_image",
-        source: {
-          type: "base64",
-          media_type: part.mimeType ?? "image/jpeg",
-          data: part.data,
-        },
-      });
-      continue;
-    }
-    if (
-      part.type === "input_image" &&
-      part.source &&
-      typeof part.source === "object" &&
-      typeof (part.source as { type?: unknown }).type === "string"
-    ) {
-      parts.push({
-        type: "input_image",
-        source: part.source as
-          | { type: "url"; url: string }
-          | { type: "base64"; media_type: string; data: string },
-      });
-    }
-  }
-  return parts;
-}
-
-function parseReasoningItem(value: unknown): Extract<InputItem, { type: "reasoning" }> | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as {
-    type?: unknown;
-    content?: unknown;
-    encrypted_content?: unknown;
-    summary?: unknown;
-  };
-  if (record.type !== "reasoning") return null;
-  return {
-    type: "reasoning",
-    ...(typeof record.content === "string" ? { content: record.content } : {}),
-    ...(typeof record.encrypted_content === "string" ? { encrypted_content: record.encrypted_content } : {}),
-    ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
-  };
-}
-
-function parseThinkingSignature(value: unknown): Extract<InputItem, { type: "reasoning" }> | null {
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  try {
-    return parseReasoningItem(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
 function convertTools(tools: Context["tools"]): FunctionToolDefinition[] {
   if (!tools || tools.length === 0) return [];
   return tools.map((tool) => ({
@@ -380,121 +264,6 @@ function convertTools(tools: Context["tools"]): FunctionToolDefinition[] {
     description: typeof tool.description === "string" ? tool.description : undefined,
     parameters: (tool.parameters ?? {}) as Record<string, unknown>,
   }));
-}
-
-function convertMessagesToInputItems(messages: Message[], modelOverride?: ReplayModelInfo): InputItem[] {
-  const items: InputItem[] = [];
-
-  for (const msg of messages) {
-    const m = msg as AnyMessage;
-
-    if (m.role === "user") {
-      const parts = contentToOpenAIParts(m.content, modelOverride);
-      if (parts.length === 0) continue;
-      items.push({
-        type: "message",
-        role: "user",
-        content:
-          parts.length === 1 && parts[0]?.type === "input_text"
-            ? (parts[0] as { type: "input_text"; text: string }).text
-            : parts,
-      });
-      continue;
-    }
-
-    if (m.role === "assistant") {
-      let assistantPhase = normalizeAssistantPhase(m.phase);
-      if (Array.isArray(m.content)) {
-        const textParts: string[] = [];
-        const pushAssistantText = () => {
-          if (textParts.length === 0) return;
-          items.push({
-            type: "message",
-            role: "assistant",
-            content: textParts.join(""),
-            ...(assistantPhase ? { phase: assistantPhase } : {}),
-          });
-          textParts.length = 0;
-        };
-
-        for (const block of m.content as Array<{
-          type?: string;
-          text?: string;
-          textSignature?: unknown;
-          id?: unknown;
-          name?: unknown;
-          arguments?: unknown;
-          thinkingSignature?: unknown;
-        }>) {
-          if (block.type === "text" && typeof block.text === "string") {
-            const parsedSignature = parseAssistantTextSignature(block.textSignature);
-            if (!assistantPhase) assistantPhase = parsedSignature?.phase;
-            textParts.push(block.text);
-            continue;
-          }
-          if (block.type === "thinking") {
-            pushAssistantText();
-            const reasoningItem = parseThinkingSignature(block.thinkingSignature);
-            if (reasoningItem) items.push(reasoningItem);
-            continue;
-          }
-          if (block.type !== "toolCall") continue;
-
-          pushAssistantText();
-          const callIdRaw = toNonEmptyString(block.id);
-          const toolName = toNonEmptyString(block.name);
-          if (!callIdRaw || !toolName) continue;
-          const [callId, itemId] = callIdRaw.split("|", 2);
-          items.push({
-            type: "function_call",
-            ...(itemId ? { id: itemId } : {}),
-            call_id: callId,
-            name: toolName,
-            arguments:
-              typeof block.arguments === "string"
-                ? block.arguments
-                : JSON.stringify(block.arguments ?? {}),
-          });
-        }
-
-        pushAssistantText();
-        continue;
-      }
-
-      const text = contentToText(m.content);
-      if (!text) continue;
-      items.push({
-        type: "message",
-        role: "assistant",
-        content: text,
-        ...(assistantPhase ? { phase: assistantPhase } : {}),
-      });
-      continue;
-    }
-
-    if (m.role !== "toolResult") continue;
-
-    const toolCallId = toNonEmptyString(m.toolCallId) ?? toNonEmptyString(m.toolUseId);
-    if (!toolCallId) continue;
-    const [callId] = toolCallId.split("|", 2);
-    const parts = Array.isArray(m.content) ? contentToOpenAIParts(m.content, modelOverride) : [];
-    const textOutput = contentToText(m.content);
-    const imageParts = parts.filter((part) => part.type === "input_image");
-    items.push({
-      type: "function_call_output",
-      call_id: callId,
-      output: textOutput || (imageParts.length > 0 ? "(see attached image)" : ""),
-    });
-    if (imageParts.length > 0) {
-      items.push({
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: "Attached image(s) from tool result:" }, ...imageParts],
-      });
-    }
-  }
-
-  return items;
 }
 
 function buildAssistantMessageFromResponse(
@@ -531,7 +300,7 @@ function buildAssistantMessageFromResponse(
         name: toolName,
         arguments: (() => {
           try {
-            return JSON.parse(item.arguments) as Record<string, unknown>;
+            return JSON.parse(item.arguments) as JsonObject;
           } catch {
             return {};
           }
@@ -587,7 +356,7 @@ function buildWsRequestKey(params: {
 }): string {
   return JSON.stringify({
     model: params.model.id,
-    instructions: params.context.systemPrompt ?? undefined,
+    instructions: getCurrentSystemPrompt(params.context.messages) || undefined,
     tools: params.tools.length > 0 ? params.tools : undefined,
     temperature: params.options?.temperature,
     max_output_tokens: params.options?.maxTokens,
@@ -620,11 +389,11 @@ export function selectInputItemsForContinuation(params: {
   if (previousResponseId && session.lastContextLength > 0) {
     const newMessages = context.messages.slice(session.lastContextLength);
     if (newMessages.length > 0) {
-      return convertMessagesToInputItems(newMessages, model);
+      return messagesToResponseItems(newMessages, model);
     }
   }
 
-  return buildFullInput(context, model);
+  return messagesToResponseItems(context.messages, model);
 }
 
 function buildResponseCreatePayload(params: {
@@ -641,7 +410,7 @@ function buildResponseCreatePayload(params: {
     model: params.model.id,
     store: false,
     input: params.inputItems,
-    instructions: params.context.systemPrompt ?? undefined,
+    instructions: getCurrentSystemPrompt(params.context.messages) || undefined,
     tools: params.tools.length > 0 ? params.tools : undefined,
     ...(params.previousResponseId ? { previous_response_id: params.previousResponseId } : {}),
     ...(params.options?.temperature !== undefined ? { temperature: params.options.temperature } : {}),
@@ -715,10 +484,6 @@ async function runWarmUp(params: {
   });
 }
 
-function buildFullInput(context: Context, model: ReplayModelInfo): InputItem[] {
-  return convertMessagesToInputItems(context.messages, model);
-}
-
 async function fallbackToHttp(
   model: ResponsesModel,
   context: Context,
@@ -737,9 +502,10 @@ async function fallbackToHttp(
       if (payload && typeof payload === "object") {
         const payloadObj = { ...(payload as Record<string, unknown>) };
         if (remoteCompactionState && remoteCompactionState.modelKey === modelKey(model)) {
-          payloadObj.input = normalizeResponseItemsForPrompt(remoteCompactionState.explicitHistory, model) as unknown[];
-          delete payloadObj.previous_response_id;
-          nextPayload = payloadObj;
+          nextPayload = applyRemoteHistoryPayloadPatch({
+            payload: payloadObj,
+            explicitHistory: normalizeResponseItemsForPrompt(remoteCompactionState.explicitHistory, model),
+          });
         } else if (
           typeof payloadObj.previous_response_id === "string" &&
           continuationState?.modelKey === modelKey(model) &&
@@ -748,7 +514,7 @@ async function fallbackToHttp(
         ) {
           const newMessages = context.messages.slice(continuationState.contextLength);
           if (newMessages.length > 0) {
-            payloadObj.input = convertMessagesToInputItems(newMessages, model) as unknown[];
+            payloadObj.input = messagesToResponseItems(newMessages, model);
             nextPayload = payloadObj;
           }
         }
@@ -757,7 +523,7 @@ async function fallbackToHttp(
       return chained ?? nextPayload;
     },
   } satisfies SimpleStreamOptions | undefined;
-  const httpStream = streamSimpleOpenAIResponses(model, context, mergedOptions);
+  const httpStream = streamSimpleOpenAIResponses(model, normalizeContext(context), mergedOptions);
   for await (const event of httpStream) {
     eventStream.push(event);
   }
@@ -847,8 +613,8 @@ export function createOpenAIWebSocketStreamFn(
             await runWarmUp({
               manager: session.manager,
               modelId: model.id,
-              tools: convertTools(context.tools),
-              instructions: context.systemPrompt ?? undefined,
+              tools: convertTools(getCurrentTools(context.messages)),
+              instructions: getCurrentSystemPrompt(context.messages) || undefined,
               signal,
             });
           } catch {
@@ -859,7 +625,7 @@ export function createOpenAIWebSocketStreamFn(
         const remoteCompactionState = getRemoteCompactionState(sessionId);
         const continuationState = getContinuationState(sessionId);
         const typedOptions = options as WsOptions | undefined;
-        const functionTools = convertTools(context.tools);
+        const functionTools = convertTools(getCurrentTools(context.messages));
         const requestKey = buildWsRequestKey({
           model,
           context,

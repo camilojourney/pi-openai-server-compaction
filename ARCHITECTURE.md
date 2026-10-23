@@ -54,6 +54,25 @@ In practice, that means keeping two representations of context alive at once:
    - `CompactionEntry.details.remoteCompaction`
 6. Pi still keeps a text summary so the session remains understandable and portable.
 
+### Request-local configuration
+
+Pi 1.4 represents prompts and tool changes in transcript system messages. Its
+Responses transports can emit `additional_tools`, synthetic client-side tool-search
+declarations, and `configuration_update` items inside `input`, rather than only
+using top-level `tools`.
+
+`applyRemoteHistoryPayloadPatch` owns history substitution for the built-in Codex
+transport and direct OpenAI HTTP fallback. It retains Pi-generated request
+configuration in order, then supplies the native compacted conversation history.
+It does not reconstruct schemas or mutate either caller input. The custom
+WebSocket path reads the effective prompt and tool set from Pi's transcript
+helpers rather than the removed provider-context shorthand.
+
+Custom tool calls are identified by the Responses `ctc_` item ID preserved in Pi's
+call ID. Replay keeps their raw string inputs, corresponding output type, and
+namespaces. JSON function calls remain JSON. The module contract lives in
+[remote history](specs/remote-history.md).
+
 ### Post-compaction continuation
 
 For later direct OpenAI Responses turns, the extension prefers:
@@ -202,11 +221,21 @@ So the package is intentionally hybrid:
 
 ## Testing strategy
 
-### Runtime smoke
+### Offline checks
 
-- `npm run smoke`
+- `npm ci --ignore-scripts`
+- `npm test`
 
-Verifies imports/loadability.
+Checks types, imports, existing context-message preservation, Pi 1.4's real request
+conversion, post-compaction configuration, tool-call replay, and a local WebSocket.
+
+### Live tool-access acceptance
+
+- `npm run test:live:tools`
+
+Uses isolated synthetic sessions and the configured provider. It verifies actual
+JSON/grammar tool execution, late registration, two native compactions, and reopening
+the saved session. Provider calls are bounded; temporary evidence is retained.
 
 ### Live end-to-end test
 

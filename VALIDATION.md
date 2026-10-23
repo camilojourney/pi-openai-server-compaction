@@ -1,6 +1,25 @@
 # Validation
 
-## Current Responses compaction v2 validation
+## Pi 1.4 tool-availability repair
+
+Validated on Pi 1.4.0 with `openai-codex/gpt-6.1-sol` on 2026-10-23:
+
+- The baseline extension succeeds before native compaction, then fails the live
+  acceptance because the requested grammar tool never executes afterward.
+- The repaired extension completes two native compactions and four actual tool
+  executions across eight ordinary model requests: JSON before compaction, grammar
+  after compaction, a newly registered tool, and grammar after reopening the session.
+- `npm test` checks types, prior context-message regressions, real Pi request
+  conversion, tool/configuration preservation, custom/namespaced replay, direct
+  OpenAI HTTP fallback, and a local WebSocket server.
+
+The live regression uses synthetic context and generated execution receipts. No
+private session transcript is included in the repository. These results do not
+re-run the historical recall benchmark or the complete provider-switch/fork suite.
+Direct OpenAI 1.4 regression coverage is offline/local-server, not fresh external
+API acceptance.
+
+## Historical Responses compaction v2 validation
 
 The full live Pi RPC suite passes with both:
 

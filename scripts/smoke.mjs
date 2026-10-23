@@ -441,7 +441,7 @@ assert.deepEqual(incrementalInput, [
   {
     type: "message",
     role: "user",
-    content: "new user",
+    content: [{ type: "input_text", text: "new user" }],
   },
 ]);
 
