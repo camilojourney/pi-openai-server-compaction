@@ -9,9 +9,8 @@ Validated on Pi 1.4.0 with `openai-codex/gpt-6.1-sol` on 2026-10-23:
 - The repaired extension completes two native compactions and four actual tool
   executions across eight ordinary model requests: JSON before compaction, grammar
   after compaction, a newly registered tool, and grammar after reopening the session.
-- `npm test` checks types, prior context-message regressions, real Pi request
-  conversion, tool/configuration preservation, custom/namespaced replay, direct
-  OpenAI HTTP fallback, and a local WebSocket server.
+
+See the [test plan](TESTPLAN.md#pi-14-regression-checks) for offline coverage.
 
 The live regression uses synthetic context and generated execution receipts. No
 private session transcript is included in the repository. These results do not
@@ -94,7 +93,7 @@ The model replied:
 
 This confirms that the OpenAI compaction endpoint is real, returns opaque compaction artifacts, and that replaying those artifacts in later Responses requests does preserve continuity across the compaction boundary.
 
-## Live Pi RPC tests
+## Historical live Pi RPC tests
 
 A full live Pi RPC test run also passed using this extension.
 
@@ -111,7 +110,7 @@ Validated end-to-end:
    - prompt stored a secret
    - `/compact` equivalent RPC compaction was run with custom instructions explicitly telling the text summary to omit the secret
    - compaction response contained `details.remoteCompaction.replacementHistory`
-   - the current direct OpenAI and OpenAI Codex paths return a `compaction` artifact item
+   - both providers returned a `compaction` artifact item
    - legacy session entries containing `compaction_summary` remain supported for replay compatibility
    - a later prompt in the same session correctly recovered the secret
 
@@ -144,7 +143,8 @@ This confirms the extension uses Responses compaction v2 artifacts in a way that
 
 After the first successful live pass, an additional cleanup/hardening pass was applied:
 
-- in-memory remote history is now only extended when the active model still matches the compaction model, preventing cross-model pollution during `/model` round-trips
+- cross-model replay protection was added; see the current
+  [safety model](ARCHITECTURE.md#safety-model) for its invariants
 - local portable-summary generation now falls back to Pi's built-in compaction helper if the full-branch summary attempt fails
 - remote compaction output is now shape-checked before being persisted or reconstructed from session details
 - the WebSocket connection manager now handles reconnect scheduling and pre-open close/error cases more defensively

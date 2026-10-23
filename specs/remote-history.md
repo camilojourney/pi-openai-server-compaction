@@ -52,4 +52,4 @@ Needs: impl, utest
 
 The extension SHALL preserve custom-tool inputs, call identifiers, and tool namespaces when replaying post-compaction tool calls and results.
 
-Needs: impl, utest
+Needs: impl, utest, itest

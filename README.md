@@ -49,11 +49,9 @@ replaying native compaction history. Earlier versions replaced the entire input,
 which could leave the model with tool names in its instructions but no callable
 tools. The earlier repair for extension/context messages is retained.
 
-The current live tool-access regression covers `openai-codex/gpt-6.1-sol`:
-two native compactions, JSON and grammar tools, a newly registered tool, and
-reopening the saved session. Direct OpenAI HTTP payloads and the custom WebSocket
-transport have offline/local-server regression coverage on Pi 1.4. Historical
-provider and recall results below are not a fresh full-suite certification.
+See [validation results](VALIDATION.md#pi-14-tool-availability-repair) for current
+Pi 1.4 acceptance and its limits. Historical provider and recall results below
+are not a fresh full-suite certification.
 
 ## Support matrix
 
@@ -88,7 +86,7 @@ pi -e ./src/index.ts --model openai/gpt-5.6-luna
 ## Requirements
 
 - Node `>=22.19`
-- Pi `1.4.x` (development dependencies and regression tests pin `1.4.0`)
+- Pi `1.4.x` (pinned development versions are in [package.json](package.json))
 - Auth/config for the model you want to use must already work in Pi
 - A supported OpenAI Responses model, e.g. `openai/gpt-5.6-sol` or `openai-codex/gpt-5.6-sol`
 
@@ -186,9 +184,8 @@ npm ci --ignore-scripts
 npm test
 ```
 
-This runs TypeScript checking, the existing smoke regressions, native Pi request
-conversion and WebSocket grammar-tool tests, and a local HTTP request-budget
-regression. No provider credentials are needed.
+No provider credentials are needed. See the
+[test plan](TESTPLAN.md#pi-14-regression-checks) for offline regression coverage.
 
 Run the bounded live tool-access regression with existing Codex authentication:
 
@@ -197,8 +194,8 @@ npm run test:live:tools
 ```
 
 It uses synthetic context and isolated sessions, not your project or existing
-conversations. It allows at most 20 ordinary requests across sessions, times out
-after five minutes, and retains temporary acceptance evidence.
+conversations. See the [test plan](TESTPLAN.md#pi-14-regression-checks) for the
+request budget, timeout, coverage, and retained evidence.
 The default model is `openai-codex/gpt-6.1-sol`; override it with
 `PI_OPENAI_SERVER_COMPACTION_TEST_MODEL`.
 

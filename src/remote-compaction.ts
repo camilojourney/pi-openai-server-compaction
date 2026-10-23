@@ -359,7 +359,7 @@ function buildPortableSummaryPrompt(conversation: string, customInstructions?: s
  * Pi carries four message kinds that are not LLM roles - `custom` (context injected by
  * extensions via `pi.sendMessage`), `bashExecution`, `branchSummary` and
  * `compactionSummary` - and flattens each one into a user-role context message before it
- * reaches the provider (`convertToLlm` in `@earendil-works/pi-agent-core`).
+ * reaches the provider (`convertToLlm` in `@earendil-works/pi-coding-agent`).
  *
  * The replacement history built from these items *replaces* Pi's own request input once a
  * remote compaction exists, so a message that is not converted here is not merely missing
@@ -1075,7 +1075,7 @@ function assistantMessageMatchesModelKey(
 }
 
 /**
- * Mirror of `sessionEntryToContextMessages` in `@earendil-works/pi-agent-core` for the
+ * Mirror of `sessionEntryToContextMessages` in `@earendil-works/pi-coding-agent` for the
  * entry kinds that carry LLM context. Extension messages are stored as `custom_message`
  * entries rather than `message` entries, so a branch walk that only looks at
  * `entry.type === "message"` silently loses them.

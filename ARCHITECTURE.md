@@ -227,23 +227,10 @@ So the package is intentionally hybrid:
 
 ## Testing strategy
 
-### Offline checks
+### Pi 1.4 regression checks
 
-- `npm ci --ignore-scripts`
-- `npm test`
-
-Checks types, imports, existing context-message preservation, Pi 1.4's real request
-conversion, post-compaction configuration, tool-call replay, and a local WebSocket.
-
-### Live tool-access acceptance
-
-- `npm run test:live:tools`
-
-Uses isolated synthetic sessions and the configured provider. It verifies actual
-JSON/grammar tool execution, late registration, two native compactions, and reopening
-the saved session. A shared budget on the agent payload boundary stops ordinary
-request 21 before extension dispatch or transmission, including after reopening.
-The run has a five-minute timeout; temporary evidence is retained.
+See the [test plan](TESTPLAN.md#pi-14-regression-checks) for offline coverage and
+bounded live tool-access acceptance, and [README](README.md#testing) for commands.
 
 ### Live end-to-end test
 
