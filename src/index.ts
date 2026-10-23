@@ -29,7 +29,6 @@ import {
   buildToolsPayload,
   callRemoteCompactionEndpoint,
   generateBestEffortLocalSummary,
-  messageToResponseItems,
   messagesToResponseItems,
   normalizeResponseItemsForPrompt,
   branchEntryToContextMessage,
@@ -127,26 +126,6 @@ function getMatchingRemoteState(
   return remoteState && remoteState.modelKey === modelKey(model) ? remoteState : undefined;
 }
 
-function extendRemoteHistoryIfCompatible(params: {
-  sessionId: string;
-  model: TargetModel | undefined;
-  message: AgentMessage;
-}): void {
-  const remoteState = getMatchingRemoteState(params.sessionId, params.model);
-  if (!remoteState || !params.model) return;
-  if (params.message.role === "assistant" && !messageMatchesModel(params.message, params.model)) {
-    return;
-  }
-
-  const items = messageToResponseItems(params.message);
-  if (items.length === 0) return;
-
-  setRemoteCompactionState(params.sessionId, {
-    ...remoteState,
-    explicitHistory: [...remoteState.explicitHistory, ...items],
-  });
-}
-
 function maybeNotifyRequestFeatures(params: {
   notifiedModels: Set<string>;
   hasUI: boolean;
@@ -211,6 +190,13 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
     releaseAllWsSessions();
   });
 
+  // [impl->req~remote-history.persisted-context~1]
+  pi.on("context", (_event, ctx) => {
+    // Idle custom messages and boundary entries can be persisted without extension
+    // message_end events. Refresh before either transport selects replacement history.
+    syncRemoteState(ctx);
+  });
+
   pi.on("session_before_compact", async (event, ctx) => {
     const cfg = loadConfig(ctx.cwd);
     const model = ctx.model;
@@ -225,6 +211,8 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
     const tools = buildToolsPayload(pi.getAllTools(), pi.getActiveTools());
     const sessionId = getSessionId(ctx);
     const branchEntries = event.branchEntries as BranchEntry[];
+    // [impl->req~remote-history.persisted-context~1]
+    syncRemoteState(ctx);
     const remoteState = getMatchingRemoteState(sessionId, model);
     const observedRequestShape = getResponsesRequestShapeState(sessionId);
     const fullBranchMessages = getBranchMessages(branchEntries);
@@ -308,12 +296,6 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
   pi.on("message_end", (event, ctx) => {
     const sessionId = getSessionId(ctx);
     const model = ctx.model;
-
-    extendRemoteHistoryIfCompatible({
-      sessionId,
-      model,
-      message: event.message,
-    });
 
     const cfg = loadConfig(ctx.cwd);
     if (!cfg.enabled || !supportsPreviousResponseId(model, cfg)) return;

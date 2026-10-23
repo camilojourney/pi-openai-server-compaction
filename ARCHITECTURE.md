@@ -83,6 +83,10 @@ For later direct OpenAI Responses turns, the extension prefers:
 - otherwise safe live continuation using `previous_response_id`
 - otherwise ordinary full-input replay / Pi fallback behavior
 
+Before each model request and compaction, replay state is reconstructed from the
+active branch. This includes persisted custom context additions even when Pi does
+not dispatch an extension `message_end` event.
+
 ## Persisted state vs runtime state
 
 ### Persisted in Pi session history
@@ -120,7 +124,7 @@ Responsibilities:
 - patch outgoing provider payloads
 - hook into Pi compaction lifecycle
 - merge local and remote compaction results
-- reconstruct remote state on session start/tree/compaction
+- reconstruct remote state on session start/tree/compaction and before requests or further compaction
 - clear ephemeral state on switch/fork/tree/model/shutdown
 
 If you want to understand the extension as a whole, start here.
@@ -200,7 +204,7 @@ The extension intentionally avoids reusing provider-native continuity blindly.
 Important safety rules:
 
 - remote replacement history is only reused for compatible OpenAI/OpenAI Codex Responses models
-- in-memory remote history is only extended while the active model still matches the compaction model
+- remote history is only selected while the active model matches the compaction model
 - reconstructed remote history only replays post-compaction turns whose assistant completions match the compaction model, avoiding cross-model pollution after resume/tree reload
 - live `previous_response_id` state is cleared on key session/model lifecycle boundaries
 - HTTP fallback remains available if the WS path is unavailable or unsafe

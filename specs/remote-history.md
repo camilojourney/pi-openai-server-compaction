@@ -4,7 +4,7 @@
 
 Kind: technical
 Capability: remote-history
-Owns: request configuration and tool-call replay across native history replacement.
+Owns: request configuration, persisted context, and tool-call replay across native history replacement.
 
 Related: [Architecture](../ARCHITECTURE.md).
 
@@ -21,6 +21,14 @@ Related: [Architecture](../ARCHITECTURE.md).
   remove tool results whose calls belong to an earlier response.
 
 ## Requirements
+
+### Include persisted context
+
+`req~remote-history.persisted-context~1`
+
+WHEN remote history is reused for a request or compaction, the extension SHALL include persisted post-compaction context messages from the active branch without duplication.
+
+Needs: impl, itest
 
 ### Preserve request configuration
 
